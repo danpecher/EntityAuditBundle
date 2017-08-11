@@ -211,6 +211,8 @@ class LogRevisionsListener implements EventSubscriber
             return;
         }
 
+        $this->maybeLogParent($eventArgs);
+
         $this->saveRevisionEntityData($class, $this->getOriginalEntityData($entity), 'INS');
     }
 
@@ -232,6 +234,8 @@ class LogRevisionsListener implements EventSubscriber
             }
         }
 
+        $this->maybeLogParent($eventArgs);
+
         // if we have no changes left => don't create revision log
         if (count($changeset) == 0) {
             return;
@@ -239,6 +243,27 @@ class LogRevisionsListener implements EventSubscriber
 
         $entityData = array_merge($this->getOriginalEntityData($entity), $this->uow->getEntityIdentifier($entity));
         $this->saveRevisionEntityData($class, $entityData, 'UPD');
+    }
+
+    private function maybeLogParent(LifecycleEventArgs $eventArgs)
+    {
+        $entity       = $eventArgs->getEntity();
+        $em           = $eventArgs->getEntityManager();
+        $associations = $em->getClassMetadata(get_class($entity))->associationMappings;
+        foreach($associations as $name => $association) {
+            // if association is audited
+            $getter = 'get' . ucfirst($name);
+            $target = $entity->{$getter}();
+
+            if (
+                $association['isOwningSide']
+                && $this->metadataFactory->isAudited($association['targetEntity'])
+                && empty($em->getUnitOfWork()->getEntityChangeSet($target))
+            ) {
+                $entityData = array_merge($this->getOriginalEntityData($target), $this->uow->getEntityIdentifier($target));
+                $this->saveRevisionEntityData($em->getClassMetadata($association['targetEntity']), $entityData, 'UPD');
+            }
+        }
     }
 
     public function onFlush(OnFlushEventArgs $eventArgs)
